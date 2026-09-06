@@ -1,0 +1,189 @@
+Trader 2026 -- Strategiestudie
+Spielzeitraum 07.09.2026 bis 30.10.2026 (40 Handelstage, 8 Wochen)
+Monte-Carlo mit 40,000 Pfaden je Variante
+
+==============================================================================
+STUDIE 1 -- Wie aggressiv muss man spielen? (je Depot, 40 Handelstage)
+==============================================================================
+Strategie                                       Median        p90        p99      p99.9  P>=250k  P>=500k  P<100k  BestTag Resets
+---------------------------------------------------------------------------------------------------------------------------------
+1 Buy&Hold Index (kein Hebel, kein Reset)       99,373     109,895     119,148     127,074     0.00%     0.00%    53.2%      5.5%     0.0
+2 Solide Aktien + milder Hebel, mit Reset      106,757     124,420     143,609     160,235     0.00%     0.00%    23.5%     12.8%     2.4
+3 Hochvola-Aktien + scharfer Hebel, OHNE Reset    90,060     150,271     218,775     287,632     0.36%     0.00%    60.4%     39.1%     0.0
+4 Hochvola-Aktien + scharfer Hebel, MIT Reset   118,200     167,793     232,693     295,481     0.53%     0.00%    23.2%     36.6%     2.4
+5 Maximale Konvexitaet (x60) MIT Reset         126,513     201,583     299,191     381,468     3.22%     0.01%    23.5%     51.1%     2.5
+6 wie 5, aber mit Stock-Picking-Vorteil        129,817     209,713     308,788     413,840     4.04%     0.03%    21.0%     52.4%     2.4
+
+Lesart: Der Median faellt mit steigender Aggressivitaet, aber nur die
+rechte Verteilungsschulter (p99.9 / P>=250k) entscheidet ueber den Sieg.
+Eine Strategie mit hoeherem Median und niedrigerem p99.9 ist im Spiel
+strikt schlechter -- es gibt keinen Preis fuer einen guten Median.
+
+==============================================================================
+STUDIE 2 -- Was ist die woechentliche Ruecksetzer-Option wert?
+==============================================================================
+Variante                                        Median        p99      p99.9   P>=250k   P<100k
+-----------------------------------------------------------------------------------------------
+ohne Ruecksetzer                                85,793    273,397    372,583     1.64%    63.0%
+Reset bei < 100.000 (rational)                 126,500    300,828    389,396     3.43%    23.7%
+Reset bei < 80.000 (zoegerlich)                113,492    287,920    380,115     2.38%    34.5%
+Reset bei < 130.000 (zu eifrig)                112,010    302,313    386,905     3.40%    38.7%
+
+Der Ruecksetzer schneidet den linken Verteilungsrand ab, ohne den
+rechten zu beschneiden. Genau deshalb ist maximales Risiko rational:
+Der Verlust ist auf 0 % begrenzt, nicht auf -100 %.
+Eine zu eifrige Schwelle (>100k) bringt bei P(>=250k) nichts mehr,
+kostet aber deutlich Median: man wirft Substanz weg, die man schon
+hatte. 100.000 EUR ist genau die richtige Schwelle -- exakt der Punkt,
+ab dem der Ruecksetzer geschenktes Kapital statt Verlust ist.
+
+==============================================================================
+STUDIE 3 -- Welcher Hebel ist optimal?
+==============================================================================
+Turbo-Hebel                                     Median        p99      p99.9   P>=250k   P>=500k
+-----------------------------------------------------------------------------------------------
+x4                                             109,962    197,226    263,363     0.15%     0.00%
+x8                                             111,180    201,484    265,301     0.17%     0.00%
+x15                                            114,136    211,443    274,855     0.22%     0.00%
+x25                                            118,320    228,692    291,806     0.46%     0.00%
+x40                                            122,896    257,736    333,633     1.32%     0.00%
+x60                                            126,474    296,477    383,766     3.15%     0.00%
+x90                                            129,428    343,957    464,079     5.90%     0.04%
+x130                                           131,793    394,338    552,220     8.76%     0.23%
+
+Die Turbos sind hier arbitragefrei bepreist: nach Finanzierungskosten
+und eingepreistem Gap-Risiko ist ihr Erwartungswert exakt null.
+Trotzdem steigt mit dem Hebel nicht nur die rechte Schulter, sondern
+auch der Median -- und das ist kein Fehler, sondern der Ruecksetzer:
+die woechentliche Untergrenze bei 100.000 EUR kappt den linken Rand,
+und unter einer solchen Untergrenze verbessert mehr Varianz jedes
+Quantil oberhalb davon. Mit Ruecksetzer ist mehr Risiko schlicht
+dominant. Die Grenze setzt nicht die Mathematik, sondern der Markt:
+Turbos mit Hebel > ~100 haben Spreads und Gap-Aufschlaege, die real
+weit ueber dem hier modellierten Prozent liegen.
+
+==============================================================================
+STUDIE 4 -- Was kostet die 20.000-Stueck-Regel?
+==============================================================================
+Frage: Gilt die Stueck-Kappe je Wertpapier oder je Depot? Das ist am
+ersten Spieltag mit zwei Kleinstorders zu klaeren.
+
+Der Effekt zeigt sich nur, wenn die attraktivsten Scheine BILLIG sind --
+dann verhindert die Stueck-Kappe, dass die 20.000 EUR investiert werden.
+Deshalb zwei Universen: eines mit Scheinen ab 1,00 EUR, eines nur mit
+Billigscheinen zu 0,10-0,25 EUR.
+
+Universum                         Auslegung                   Einsatz EUR   P(>=1.5x/Wo)
+----------------------------------------------------------------------------------------
+Scheine ab 1,00 EUR verfuegbar    je Wertpapier                    20,000         3.89%
+Scheine ab 1,00 EUR verfuegbar    je Depot                         20,000         3.89%
+nur Billigscheine 0,10-0,25 EUR   je Wertpapier                    20,000         2.32%
+nur Billigscheine 0,10-0,25 EUR   je Depot                          5,402         0.01%
+
+Der Preis je Schein aendert die Konvexitaet pro Euro NICHT -- das
+Bezugsverhaeltnis gleicht das aus. Die Stueck-Regel kostet nur dann
+etwas, wenn sie verhindert, die vollen 20.000 EUR einzusetzen.
+Praktische Regel: maximaler Hebel, und mindestens 1/Preis Produkte
+kombinieren, damit das Budget voll investiert ist.
+
+==============================================================================
+STUDIE 5 -- Einsatz fuer die beste Tagesperformance (1 Handelstag)
+==============================================================================
+
+--- normaler Tag (Basiswert-Vola 16%) ---
+WKN          Produkt                      Brief  Stueck   Einsatz  Hebel  KO-Abst
+----------------------------------------------------------------------------------
+SYNL70050    Long x70 @0.50               0.509       1         1   70.0     1.4%
+SYNL70200    Long x70 @2.00               2.036    9823    19,999   70.0     1.4%
+----------------------------------------------------------------------------------
+Summe                                                      20,000
+   budget_eur                     20,000.0000
+   eingesetzt_eur                 19,999.9157
+   budget_ausgeschoepft_%         99.9996
+   P(Totalverlust Sleeve)         0.0969
+   Sleeve Median-Faktor           0.9665
+   Sleeve p95-Faktor              2.0983
+   Sleeve p99-Faktor              2.6823
+   P(Depot >= 1.3x)               0.0166
+   Depot Median                   99,329.7279
+   Depot p99                      133,645.2228
+
+--- Ereignistag (FOMC/EZB) (Basiswert-Vola 30%) ---
+WKN          Produkt                      Brief  Stueck   Einsatz  Hebel  KO-Abst
+----------------------------------------------------------------------------------
+SYNL70010    Long x70 @0.10               0.110       2         0   70.0     1.4%
+SYNL70025    Long x70 @0.25               0.275       1         0   70.0     1.4%
+SYNL70200    Long x70 @2.00               2.202    9083    19,999   70.0     1.4%
+----------------------------------------------------------------------------------
+Summe                                                      20,000
+   budget_eur                     20,000.0000
+   eingesetzt_eur                 19,999.9454
+   budget_ausgeschoepft_%         99.9997
+   P(Totalverlust Sleeve)         0.3081
+   Sleeve Median-Faktor           0.8236
+   Sleeve p95-Faktor              2.8504
+   Sleeve p99-Faktor              3.8730
+   P(Depot >= 1.3x)               0.0835
+   Depot Median                   96,472.6531
+   Depot p99                      157,459.4228
+
+Wichtig: Das Hebelbudget ist absolut auf 20.000 EUR gedeckelt. Bei
+einem 100k-Depot sind das 20 % Wirkung, bei einem 300k-Depot nur 6,7 %.
+Der Tagesperformance-Preis ist damit strukturell an ein frisch
+zurueckgesetztes 100k-Depot gebunden.
+
+==============================================================================
+STUDIE 6 -- Rollenteilung der beiden Depots
+==============================================================================
+Aufstellung                          P(bestes>=250k)   P(bestes>=500k)   bester Tag p99   beste Woche p99
+---------------------------------------------------------------------------------------------------------
+beide identisch (scharf)                       0.95%             0.00%           40.7%            61.8%
+Compounder + Sniper                            3.76%             0.01%           51.7%            89.0%
+beide maximal (x60)                            6.42%             0.01%           57.0%            98.7%
+
+Zwei Depots sind zwei unabhaengige Lose. Fuer den Gesamtsieg zaehlt nur
+das bessere, also senkt Diversifikation zwischen den Depots die
+Siegchance -- sie erhoeht sie nicht.
+
+==============================================================================
+STUDIE 7 -- Knock-out-Turbo oder Faktor-Zertifikat fuer die 20.000 EUR?
+==============================================================================
+Der entscheidende Unterschied liegt nicht in der Rendite, sondern im
+Slot: Das Hebelbudget ist dauerhaft auf 20.000 EUR gedeckelt. Knockt
+ein Turbo aus, sind diese 20.000 EUR weg und man darf nur wieder
+20.000 EUR nachlegen -- man kommt nie voran. Ein Faktor-Zertifikat
+kann nicht ausgeknockt werden und zinst denselben Slot ueber acht
+Wochen auf. Dafuer frisst der taegliche Reset in Seitwaertsphasen.
+
+--- Horizont: 1 Woche, DAX-Vola 16 %, 20.000 EUR Einsatz ---
+Produkt                       Median      p95      p99     p99.9  P(Totalverlust)
+---------------------------------------------------------------------------------
+Faktor-Zertifikat 5x          19,910   23,892   25,885    28,615            0.0%
+Faktor-Zertifikat 10x         19,599   28,175   32,904    39,901            0.0%
+Faktor-Zertifikat 15x         19,068   32,806   41,267    54,664            0.0%
+KO-Turbo x25                  19,904   38,506   47,052    57,980            5.6%
+KO-Turbo x70                  11,380   66,561   89,067   117,576           44.6%
+
+--- Horizont: volles Spiel (40 Tage), DAX-Vola 16 %, 20.000 EUR Einsatz ---
+Produkt                       Median      p95      p99     p99.9  P(Totalverlust)
+---------------------------------------------------------------------------------
+Faktor-Zertifikat 5x          19,057   32,065   39,837    51,247            0.0%
+Faktor-Zertifikat 10x         16,418   46,582   71,474   117,676            0.0%
+Faktor-Zertifikat 15x         12,767   61,366  116,792   237,891            0.2%
+KO-Turbo x25                       0   70,718   94,966   123,697           50.3%
+KO-Turbo x70                       0  130,653  195,864   269,662           79.6%
+
+Lesart -- vorsichtig, die Zahlen sind eindeutiger als die uebliche
+Faustregel: Der scharfe Turbo behaelt auch ueber 40 Tage die groesste
+rechte Schulter (p99.9 rund 270k gegen 238k). Er erkauft sie aber mit
+79,6 % Totalverlustwahrscheinlichkeit gegen 0,2 %. Das Faktor-Zertifikat
+holt also rund 88 % des Extremszenarios bei praktisch keinem Ausfall.
+
+Wichtige Einschraenkung: Dieser Vergleich haelt eine einzige Position
+40 Tage durch. In der Praxis kann man den Turbo woechentlich neu
+aufsetzen -- dann kostet jeder Knock-out aber erneut 20 % des Depots.
+Genau diesen Effekt misst Studie 3 im vollstaendigen Spielverlauf.
+
+Praktische Konsequenz: Faktor-Zertifikat als dauerhafte Hebelbasis im
+Compounder-Depot (der Slot ueberlebt), scharfe Turbos als terminierte
+Ereigniswette im Sniper-Depot (dort ist der Ruecksetzer das Netz).
