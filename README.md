@@ -151,6 +151,51 @@ Hebelbudget sind bei 100k Depot 20 % Wirkung, bei 300k nur 6,7 %. Der Preis
 ist strukturell an ein frisch zurückgesetztes 100k-Depot an einem
 Ereignistag gebunden.
 
+Entscheidend ist dabei **nicht der Hebel, sondern Hebel × Tagesvola des
+Basiswerts** — die Bewegung, die die 20.000 € an einem Tag machen können:
+
+| Basiswert | Tagesvola | engster KO-Abstand | in σ | Hebel | Sleeve-Tagesvola |
+|---|---:|---:|---:|---:|---:|
+| NVIDIA | 2,87 % | 2,72 % | 0,95 | 33,6 | **96,3 %** |
+| Palantir | 3,40 % | 3,66 % | 1,08 | 23,8 | 81,0 % |
+| Coinbase | 5,27 % | 5,70 % | 1,08 | 14,8 | 77,9 % |
+| Tesla | 3,20 % | 4,24 % | 1,32 | 19,8 | 63,4 % |
+| DAX 40 | 0,56 % | 1,22 % | 2,16 | 75,5 | 42,6 % |
+| S&P 500 | 0,52 % | 1,66 % | 3,18 | 19,5 | 10,2 % |
+| Nasdaq-100 | 0,82 % | 3,60 % | 4,42 | 12,0 | 9,8 % |
+
+(Spreadfilter ≤ 3 %, jeweils der engste angebotene Long-Turbo.)
+
+Index-Turbos können den Tagesperformance-Preis strukturell nicht gewinnen.
+Einzelaktien-Turbos erreichen die doppelte bis zehnfache Tagesbewegung — die
+US-Index-Produkte bei SG sind mit Hebel 12–20 sogar ausgesprochen schwach.
+
+### Der Emittent hat die Knock-out-Frage schon beantwortet
+
+Naheliegender Einwand: Bei hohem Hebel knockt ein kurzer Ausschlag in die
+falsche Richtung die Position sofort aus. Das stimmt, und der Effekt ist
+größer, als eine Schlusskursbetrachtung nahelegt — der Turbo stirbt beim
+**Berühren** der Barriere. Nach dem Spiegelungsprinzip gilt für einen
+driftfreien Pfad P(Berührung) ≈ 2 · P(Schlusskurs jenseits). Gemessen an
+echten Tesla-Turbos über 78 Intraday-Schritte (`scripts/study_knockout.py`):
+
+| KO-Abstand | Hebel | P(KO) intraday | P(KO) nur Schluss | Unterschätzung |
+|---:|---:|---:|---:|---:|
+| 4,95 % | 17,5 | 50,0 % | 29,1 % | 1,72× |
+| 7,96 % | 11,6 | 29,9 % | 17,8 % | 1,68× |
+| 11,85 % | 6,1 | 13,1 % | 8,2 % | 1,61× |
+| 19,95 % | 4,2 | 1,5 % | 1,0 % | 1,48× |
+
+Wer nur Schlusskurse modelliert, unterschätzt das Ausfallrisiko also um
+rund 70 %.
+
+Die praktische Entwarnung: **SG bietet gar keine Scheine an, die sofort
+ausknocken würden.** Der engste verfügbare Turbo liegt im Median 1,32
+Tagesstandardabweichungen von der Barriere entfernt — bei Einzelaktien rund
+1σ, bei Indizes 2–4σ. Der Emittent trägt das Gap-Risiko und bepreist es,
+deshalb endet die Hebelleiter dort, wo sie endet. Man kann sich also gar
+nicht so weit hinauslehnen, wie die Zielfunktion es nahelegen würde.
+
 ### Wochen-Playbook
 
 | Wann | Was |
@@ -391,9 +436,28 @@ heißt mehr Hebel pro Euro. Gleichzeitig gab es in *jedem* Midterm-Wahljahr seit
 1990 einen Rücksetzer von ≥7 % zwischen Mitte August und Mitte Oktober — das
 liegt exakt im Spielfenster. Long Vola statt Long Momentum.
 
-**Katalysatoren:** EZB 10.09. · **FOMC 16.09.** (20:00, voll handelbar) ·
-Triple Witching 18.09. · Quartalsende 30.09. · Q3-Berichtssaison ab 13.10. ·
-**FOMC 28.10.** (zwei Tage vor Spielende) · EZB 29.10.
+**Katalysatoren:** EZB 10.09. · FOMC 16.09. · Triple Witching 18.09. ·
+Quartalsende 30.09. · Q3-Berichtssaison ab 13.10. · **Tesla Q3 ~22.10.** ·
+FOMC 28.10. · **Coinbase Q3 wirkt 30.10.** (letzter Spieltag).
+
+### Korrektur: FOMC ist kein Volatilitätsereignis
+
+Eine frühere Fassung dieses Dokuments nannte den 16.09. den „besten
+Einzeltermin des Spiels". Das ist empirisch falsch. Gemessen über 13
+FOMC-Entscheidungstage seit 2025 (`scripts/fomc_calibration.py`) bewegen sich
+Indizes an diesen Tagen **weniger** als an gewöhnlichen Tagen:
+
+| Index | FOMC-Tag ⌀ | normaler Tag ⌀ | Faktor |
+|---|---:|---:|---:|
+| S&P 500 | 0,54 % | 0,68 % | 0,80 |
+| Nasdaq 100 | 0,66 % | 0,97 % | 0,68 |
+| DAX | 0,40 % | 0,79 % | 0,50 |
+
+Der DAX-Wert hat zusätzlich einen strukturellen Grund: Der Kassaindex
+schließt um 17:30, also vor dem Entscheid um 20:00 — die Reaktion erscheint
+erst am Folgetag (⌀ 1,07 %). SG stellt DAX-Turbos nach Xetra-Schluss über den
+Future weiter, das Produkt bewegt sich also; nur der Index hinkt nach. Am
+EZB-Termin 10.09. lässt sich das überprüfen.
 
 ---
 

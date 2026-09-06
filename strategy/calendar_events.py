@@ -27,8 +27,11 @@ EVENTS: list[Event] = [
           "Voll in der Handelszeit. DAX/Euro-Vola, Bund-Turbos."),
     Event(date(2026, 9, 11), "US CPI (erwartet)", "macro", 2,
           "14:30 MEZ. Termin vor Spielstart gegenpruefen."),
-    Event(date(2026, 9, 16), "FOMC-Entscheid 20:00 + Dot Plot + Powell 20:30", "macro", 3,
-          "Bester Einzeltermin des Spiels: liegt vollstaendig in der EUWAX-Handelszeit bis 22:00."),
+    Event(date(2026, 9, 16), "FOMC-Entscheid 20:00 + Dot Plot + Powell 20:30", "macro", 2,
+          "Liegt in der Handelszeit bis 22:00. ABER: empirisch bewegen sich Indizes "
+          "an FOMC-Tagen WENIGER als an normalen Tagen (S&P Faktor 0,80, DAX 0,50 "
+          "ueber 13 Sitzungen). Kein Tagesperformance-Kandidat, siehe "
+          "scripts/fomc_calibration.py."),
     Event(date(2026, 9, 18), "Grosser Verfallstag (Triple Witching)", "technical", 3,
           "Hoechste Umsaetze des Quartals, Pinning und danach Gamma-Unwind."),
     Event(date(2026, 9, 21), "Index-Rebalancing wirksam (Woche)", "technical", 2,
@@ -40,7 +43,15 @@ EVENTS: list[Event] = [
           "Ab hier taeglich Einzelwert-Katalysatoren fuer den Aktien-Sleeve."),
     Event(date(2026, 10, 15), "US-Grossbanken Q3 (u.a. USB 15:00 MEZ)", "earnings", 3, ""),
     Event(date(2026, 10, 20), "Big-Tech-Woche beginnt", "earnings", 3,
-          "Zahlen kommen nach US-Schluss, also nach 22:00 -- handelbar ist erst der Folgetag."),
+          "Zahlen kommen nach US-Schluss (22:05 MEZ), die EUWAX schliesst 22:00. "
+          "Die Position muss also ueber die Veroeffentlichung gehalten werden, "
+          "die Tagesperformance faellt am Folgetag an."),
+    Event(date(2026, 10, 22), "Tesla Q3 (Termin ~21.-28.10., unbestaetigt)", "earnings", 3,
+          "Bester Tagesperformance-Kandidat: Tesla-Turbos erreichen eine "
+          "Sleeve-Tagesvola von 153 % gegen 34 % bei DAX-Turbos."),
+    Event(date(2026, 10, 30), "Coinbase Q3 wirkt (Bericht 29.10. nach Schluss)", "earnings", 3,
+          "Faellt exakt auf den letzten Spieltag -- zugleich Tagesperformance-"
+          "Chance und Schlussbewertung. Entsprechend riskant fuer den Gesamtrang."),
     Event(date(2026, 10, 28), "FOMC-Entscheid 19:00/20:00", "macro", 3,
           "Zwei Handelstage vor Spielende. Letzte grosse Konvexitaetschance."),
     Event(date(2026, 10, 29), "EZB-Zinsentscheid", "macro", 2, ""),

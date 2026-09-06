@@ -182,7 +182,25 @@ class SGClient:
 
 
 # ------------------------------------------------------------ Konvertierung
-def infer_spot(records: list[dict]) -> float | None:
+def fx_to_eur(records: list[dict], fx_rate: float | None = None) -> float:
+    """Umrechnungsfaktor: Basiswertwaehrung -> EUR.
+
+    Scheine auf US-Aktien notieren in EUR, ihr Basispreis aber in USD. Ohne
+    Umrechnung ist der theoretische Preis um den Wechselkurs zu hoch (Faktor
+    ~1,16). Das faellt nicht als Fehler auf, sondern verschiebt die
+    Preisprobe -- und filtert im Zweifel eine ganze Richtung heraus.
+    """
+    waehrungen = {str(r.get("AssetCurrency") or r.get("AssetCurrencyRaw") or "")
+                  for r in records}
+    if not (waehrungen & {"USD"}):
+        return 1.0
+    if fx_rate is None:
+        from . import data
+        fx_rate = data.last_price("EURUSD=X") or 1.16
+    return float(fx_rate)
+
+
+def infer_spot(records: list[dict], fx: float = 1.0) -> float | None:
     """Leitet den Basiswertkurs aus Strike und Produktpreis ab.
 
     Die Trefferliste enthaelt den Kurs des Basiswerts nicht, wohl aber alles,
@@ -207,12 +225,14 @@ def infer_spot(records: list[dict]) -> float | None:
         if not strike or px <= 0 or ratio <= 0:
             continue
         d = -1 if str(r.get("PutOrCall") or "").lower() in ("put", "short") else +1
-        kandidaten.append(strike + d * px * ratio)
+        # alles in EUR rechnen: Strike kommt in Basiswertwaehrung, Preis in EUR
+        kandidaten.append(strike / fx + d * px * ratio)
     return statistics.median(kandidaten) if kandidaten else None
 
 
 def to_turbos(records: list[dict], spot: float | None = None,
-              require_offer: bool = True, verbose: bool = True):
+              require_offer: bool = True, verbose: bool = True,
+              fx_rate: float | None = None):
     """Wandelt SG-Suchtreffer in bewertbare Turbo-Objekte des Optimizers.
 
     Produkte ohne Briefkurs sind nicht kaufbar und fliegen raus -- im
@@ -220,8 +240,9 @@ def to_turbos(records: list[dict], spot: float | None = None,
     """
     from .optimizer import Turbo
 
+    fx = fx_to_eur(records, fx_rate)
     if spot is None:
-        spot = infer_spot(records)
+        spot = infer_spot(records, fx)
     out, verworfen = [], {}
 
     def drop(reason):
@@ -256,8 +277,13 @@ def to_turbos(records: list[dict], spot: float | None = None,
         # Multiplikator -> umrechnen, sonst liegt der Wert um Faktor 10.000 daneben.
         pc = str(r.get("PutOrCall") or "").lower()
         direction = -1 if pc in ("put", "short") else +1
+        # Strike und Barriere in EUR umrechnen, damit sie zum EUR-Briefkurs passen
         barrier = zahl(r.get("BarrierTurboCertificate")) or None
         strike = zahl(r.get("Strike")) or None
+        if barrier is not None:
+            barrier /= fx
+        if strike is not None:
+            strike /= fx
         ratio = zahl(r.get("Ratio")) or 1.0
         lev = zahl(r.get("CurrentLeverage")) or None
 
@@ -293,8 +319,9 @@ def to_turbos(records: list[dict], spot: float | None = None,
         ))
 
     if verbose:
+        fx_hinweis = f", FX {fx:.4f}" if abs(fx - 1.0) > 1e-9 else ""
         print(f"  {len(records):,} Treffer -> {len(out):,} bewertbar"
-              f"{f' (Spot ~{spot:,.2f})' if spot else ''}")
+              f"{f' (Spot ~{spot:,.2f} EUR{fx_hinweis})' if spot else ''}")
         for k, v in sorted(verworfen.items(), key=lambda x: -x[1]):
             print(f"      {v:6,}  {k}")
     return out

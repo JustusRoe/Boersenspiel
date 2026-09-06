@@ -22,7 +22,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from strategy.sg_api import (ASSETS, CLS_BEST_TURBO_OPEN_END,  # noqa: E402
+from strategy.sg_api import (ASSETS, CLS_BEST_TURBO_OPEN_END, fx_to_eur,  # noqa: E402
                              CLS_FAKTOR_OS_LEAF, CLS_STANDARD_OS,
                              CLS_UNLIMITED_TURBO_MINI, SGClient,
                              enrich_factors, infer_spot)
@@ -102,7 +102,8 @@ def main() -> None:
     df = pd.DataFrame(rows).drop_duplicates(subset=["Code"], keep="first")
     # Basiswertkurs je Asset ableiten (die Trefferliste enthaelt ihn nicht)
     for asset_name, grp in df.groupby("_asset_name"):
-        spot = infer_spot(grp.to_dict("records"))
+        recs_a = grp.to_dict("records")
+        spot = infer_spot(recs_a, fx_to_eur(recs_a))
         df.loc[df["_asset_name"] == asset_name, "_spot"] = spot
         print(f"  {asset_name}: {len(grp):,} Produkte, abgeleiteter Kurs {spot:,.2f}")
 
