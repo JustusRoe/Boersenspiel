@@ -123,6 +123,23 @@ def main() -> None:
 
     fa = waehle_faktor(+1, budget_a)
 
+    # ---------------------------------------------------------------- Strategie
+    #
+    # Depot A und Depot B bekommen NICHT dieselbe Wette in Gegenrichtung.
+    # Long DAX in A und Short DAX in B waere eine reine Wette auf |Bewegung|,
+    # bezahlt mit zwei Spreads und zwei Finanzierungskosten -- und das auf dem
+    # Basiswert mit der schwaechsten Konvexitaet des Universums.
+    #
+    # Die Long/Short-Aufteilung gehoert an EINEN Ereignistag auf EINEN
+    # Basiswert, wenn die Richtung binaer und unbekannt ist (Quartalszahlen).
+    # Dort verdoppelt sie die Trefferwahrscheinlichkeit, weil die
+    # Tageswertung ein Maximum ueber beide Depots ist. Als Dauerstruktur ueber
+    # acht Wochen ist sie sinnlos.
+    #
+    # Als Dauerstruktur gilt stattdessen: zwei Depots, zwei moeglichst
+    # unabhaengige Wetten, beide maximal konvex und beide in der Richtung, an
+    # die wir tatsaechlich glauben.
+    #
     # Deckt der Ruecksetzer den Hebel-Sleeve noch ab?
     #
     # Der Ruecksetzer stellt 100.000 EUR her. Faellt der Sleeve komplett aus,
@@ -133,12 +150,19 @@ def main() -> None:
     # der Ausfall also ein echter Verlust. Ab da lohnen weitere Barrieren und
     # Absicherungen. Die Schwelle liegt bei rund 120.000 EUR Depotwert.
     reset_deckt_b = (args.depot_b - budget_b) < rules.START_CAPITAL
-    if reset_deckt_b:
-        tb = (waehle_turbo(-1, budget_b, 0.008, 0.020)
-              or waehle_turbo(-1, budget_b, 0.005, 0.035))
-    else:
-        tb = (waehle_turbo(-1, budget_b, 0.030, 0.060)
-              or waehle_turbo(-1, budget_b, 0.020, 0.090))
+    # Depot B wartet, wenn heute nur schwache Konvexitaet verfuegbar ist.
+    # Am US-Feiertag erreichen europaeische Basiswerte rund 37 % Sleeve-
+    # Tagesvola, US-Einzelwerte am Folgetag rund 96 %. Ein Tag weniger
+    # Exposure ist billiger als acht Wochen im schwaecheren Instrument.
+    b_wartet = not us_offen
+    tb = None
+    if not b_wartet:
+        if reset_deckt_b:
+            tb = (waehle_turbo(+1, budget_b, 0.008, 0.020)
+                  or waehle_turbo(+1, budget_b, 0.005, 0.035))
+        else:
+            tb = (waehle_turbo(+1, budget_b, 0.030, 0.060)
+                  or waehle_turbo(+1, budget_b, 0.020, 0.090))
 
     print("\n" + "-" * 84)
     print("HEUTE AUFGEBEN (europaeische Basiswerte, Xetra offen ab 9:00)")
@@ -157,21 +181,15 @@ def main() -> None:
         nr += 1
         st = min(int(budget_b // tb.ask), rules.MAX_LEVERAGE_UNITS)
         chk = rules.check_buy(args.depot_b, args.depot_b, tb.ask, st, leveraged=True)
-        print(order_zeile(nr, "B", f"DAX Short-Turbo Hebel {tb.omega:.0f}",
-                          tb.wkn, chk.units, tb.ask,
+        print(order_zeile(nr, "B", f"Turbo Hebel {tb.omega:.0f}", tb.wkn, chk.units, tb.ask,
                           f"KO {tb.ko_barrier:,.0f} ({tb.distance_to_ko_pct*100:.2f} % entfernt)"))
-        print(f"      Gegenrichtung zu Depot A. Der Tagesperformance-Preis ist ein")
-        print(f"      Maximum ueber beide Depots, nicht eine Summe -- entgegengesetzte")
-        print(f"      Richtungen erhoehen die Trefferwahrscheinlichkeit.")
-        if reset_deckt_b:
-            print(f"      Enge Barriere gewaehlt: Bei einem Ausfall landet Depot B bei")
-            print(f"      {args.depot_b - budget_b:,.0f} EUR, der Ruecksetzer stellt 100.000 her.")
-            print(f"      Der Verlust ist also erstattet -- maximale Konvexitaet ist hier")
-            print(f"      nicht waghalsig, sondern die richtige Wahl.")
-        else:
-            print(f"      Weitere Barriere gewaehlt: Bei einem Ausfall bliebe Depot B bei")
-            print(f"      {args.depot_b - budget_b:,.0f} EUR, also UEBER 100.000. Ein Ruecksetzer")
-            print(f"      waere jetzt Wertvernichtung, der Ausfall damit ein echter Verlust.")
+    elif b_wartet:
+        print("  Depot B: heute KEINE Hebelposition.")
+        print("      Am US-Feiertag liegt die beste verfuegbare Konvexitaet bei rund")
+        print("      37 % Sleeve-Tagesvola (DAX). Morgen ab 15:30 sind es rund 96 %")
+        print("      (NVIDIA) bzw. 78-81 % (Palantir, Coinbase). Das Hebelbudget ist")
+        print("      nicht an den Tag gebunden -- es lohnt nicht, es heute zu")
+        print("      verbrennen. Depot B bleibt bis morgen in Cash.")
 
     print("\n" + "-" * 84)
     print("MORGEN AB 15:30 (US-Eroeffnung, Aktien-Sleeve)" if not us_offen
