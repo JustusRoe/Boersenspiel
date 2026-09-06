@@ -278,6 +278,89 @@ gehebeltes Produkt außerhalb dieser Namen fiele nicht unter die
 
 ---
 
+## 6b. Produktdaten direkt aus der SG-API
+
+Der Excel-Export ist nicht nur auf 5.000 Produkte gedeckelt, er liefert auch
+weder Knock-out-Schwelle noch Bezugsverhältnis noch die Long/Short-Richtung —
+damit ist **kein einziger Turbo bewertbar**. Die Website selbst holt ihre
+Daten aus einer öffentlichen JSON-API, die alle diese Felder mitliefert.
+
+```
+https://www.sg-zertifikate.de/emcwebapi/api/<endpunkt>
+```
+
+| Endpunkt | Inhalt |
+|---|---|
+| `ProductSearch/Search` | Trefferliste mit `PutOrCall`, `Ratio`, `Strike`, `BarrierTurboCertificate`, `CurrentLeverage`, `Bid`, `Offer` |
+| `ProductSearch/ProductClassifications` | Produktarten-Baum mit ihren Ids |
+| `ProductSearch/Assets` | Basiswerte mit Ids (DAX 40 = 389, Nasdaq-100 = 315, S&P 500 = 693) |
+| `Products/AllProperties/{id}` | Alle Kennzahlen eines Produkts, inkl. `FactorLeverage`, `StrategyExtended`, `Delta` |
+| `Products/GetProductsByCodes?codes=` | Stammdaten zu einer WKN-Liste |
+| `Prices/{id}` | Kurshistorie |
+
+Benutzung:
+
+```bash
+python3 scripts/sg_scrape.py --suche NVIDIA                  # Asset-Id finden
+python3 scripts/sg_scrape.py --assets "DAX 40" --typen turbo,factor
+python3 scripts/optimize_basket.py --csv data/sg/dax.csv --horizont 5
+```
+
+### Fallstricke, die im Code dokumentiert sind
+
+Die API hat mehrere Eigenheiten, die stillschweigend falsche Ergebnisse
+erzeugen statt Fehler zu werfen:
+
+- **Paginierung**: Nur `pageNum` blättert wirklich. `PageNumber`, `pageNumber`,
+  `pageIndex`, `skip` und `offset` werden ignoriert und liefern immer wieder
+  Seite 1 — mit HTTP 200 und voller Trefferliste. Ein erster Lauf erzeugte so
+  10.418 Zeilen mit nur 5.918 verschiedenen Produkten.
+- **Bezugsverhältnis ist ein Divisor**: `Ratio: 100` heißt „100 Scheine je
+  Indexeinheit", also `Preis = |Spot − Strike| / Ratio`. Als Multiplikator
+  gelesen liegt der Wert um Faktor 10.000 daneben.
+- **Der Basiswertkurs fehlt** in der Trefferliste. Er folgt exakt aus
+  `Spot = Strike ± Preis · Ratio` (Abweichung zur Yahoo-Referenz: 0,06 %).
+  Der Umweg über den Hebel wäre ungenauer (1,9 %).
+- **Faktor-Produkte** liegen unter Klassifikation **44100**, nicht 228, und
+  ihre Trefferliste enthält weder Hebel noch Richtung noch Kurse — alles nur
+  in `AllProperties`. `FactorLeverage` trägt die Richtung im Vorzeichen
+  (−9 = Short 9x).
+- **NaN**: Fehlende Kurse rutschen durch naive Prüfungen, weil sowohl
+  `nan > 0` als auch `nan <= 0` False ergeben.
+- **Mini-Futures**: Bei Unlimited Turbos liegt die Stop-Loss-Schwelle vor dem
+  Basispreis; der Wert bemisst sich am Basispreis, ausgeknockt wird an der
+  Schwelle, und bei Auslösung gibt es den Restwert dazwischen.
+
+`sg_api.validate_pricing()` rechnet als Kreuzprobe jeden Briefkurs aus Spot
+und Strike nach und verwirft Produkte, bei denen das nicht aufgeht — eine um
+Faktor 10 falsche Ratio erzeugt sonst scheinbar risikolose Vervielfacher.
+
+### Erstes Ergebnis auf echten Daten (06.09.2026)
+
+6.286 DAX-Produkte, Depot 100.000 €, Horizont eine Woche, realisierte
+DAX-Vola 8,9 % (angesetzt 11,2 %):
+
+| Kennzahl | Wert |
+|---|---:|
+| gewählter Schein | FG6K28, DAX Short, Hebel 59, KO-Abstand 1,45 %, Spread 0,2 % |
+| Einsatz | 19.999 € von 20.000 € |
+| P(Totalverlust des Hebel-Sleeves) | 29,8 % |
+| Sleeve Median | 0,84× |
+| Sleeve p99 | 3,16× |
+| P(Depot ≥ 150k in einer Woche) | 0,41 % |
+
+Deutlich nüchterner als am synthetischen Universum (dort 3,75 %) — weil die
+reale DAX-Vola mit 8,9 % weit unter den dort angesetzten 16 % liegt. Über
+acht Wochen und mit dem Rücksetzer als Netz bleibt die Struktur trotzdem
+tragfähig; die Ereignistage (FOMC, EZB) sind genau deshalb so wichtig.
+
+Ein Nebenbefund für die Produktauswahl: Faktor-Zertifikate haben sehr
+ungleiche Spreads — 0,1 % beim 9,74-€-Schein, 38,5 % beim 0,026-€-Schein.
+Zusammen mit der 20.000-Stück-Regel heißt das, dass hier die **teuren**
+Scheine die richtigen sind.
+
+---
+
 ## 7. Was ausdrücklich verboten ist
 
 Ziffer 10 der Spielregeln, ohne Interpretationsspielraum:
@@ -353,6 +436,7 @@ bewertet; Turbos ohne Knock-out-Angabe werden übersprungen statt geraten.
 | `strategy/data.py` | Marktdaten (Yahoo) über `requests` |
 | `strategy/screener.py` | Kandidatensuche für den Aktien-Sleeve |
 | `strategy/calendar_events.py` | Katalysatorkalender des Spielzeitraums |
+| `strategy/sg_api.py` | Client für die JSON-API hinter sg-zertifikate.de |
 
 ---
 

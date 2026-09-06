@@ -46,6 +46,11 @@ class Turbo:
     leverage: float | None = None
     product_type: str = "turbo"   # turbo | factor | warrant
     days_to_expiry: int | None = None   # nur fuer Standard-Optionsscheine
+    # Bei Unlimited Turbos (Mini) liegt die Stop-Loss-Schwelle VOR dem
+    # Basispreis: der Wert bemisst sich am Basispreis, ausgeknockt wird an
+    # der Schwelle, und bei Ausloesung erhaelt man den Restwert dazwischen.
+    # Bei BEST Turbos fallen beide zusammen, dann ist der Restwert null.
+    strike: float | None = None
 
     @property
     def spread_pct(self) -> float:
@@ -158,13 +163,68 @@ def payoff_per_unit(t: Turbo, S_end: np.ndarray, S_min: np.ndarray,
         step = np.maximum(1.0 + t.direction * lev * r, 0.0)
         return t.ask * np.prod(step, axis=1)
 
+    strike = t.strike if t.strike is not None else t.ko_barrier
     if t.direction > 0:
         knocked = S_min <= t.ko_barrier
-        intrinsic = np.maximum(S_end - t.ko_barrier, 0.0)
+        intrinsic = np.maximum(S_end - strike, 0.0)
+        residual = max(t.ko_barrier - strike, 0.0)      # Mini: Restwert bei Stop-Loss
     else:
         knocked = S_max >= t.ko_barrier
-        intrinsic = np.maximum(t.ko_barrier - S_end, 0.0)
-    return np.where(knocked, 0.0, intrinsic * t.ratio)
+        intrinsic = np.maximum(strike - S_end, 0.0)
+        residual = max(strike - t.ko_barrier, 0.0)
+    return np.where(knocked, residual * t.ratio, intrinsic * t.ratio)
+
+
+# --------------------------------------------------------------- Vorauswahl
+def preselect_candidates(products: list[Turbo], max_products: int = 400,
+                         bucket_step: float = 1.35, per_bucket: int = 2,
+                         verbose: bool = True) -> list[Turbo]:
+    """Reduziert ein grosses Produktuniversum auf einen repraesentativen Korb.
+
+    Die SG-API liefert je Basiswert mehrere tausend Turbos. Eine Payoff-Matrix
+    ueber 10.000 Produkte x 30.000 Pfade waere rund 2,4 GB gross -- und
+    voellig unnoetig: Zwei Turbos mit gleichem Hebel, gleicher Richtung und
+    gleichem Basiswert sind wirtschaftlich identisch, sie unterscheiden sich
+    nur in Preis und Spread.
+
+    Deshalb wird je (Basiswert, Richtung, Produkttyp) ein logarithmisches
+    Hebelraster gebildet und darin jeweils der Schein mit dem engsten Spread
+    behalten. Ein zweiter je Feld bleibt als Preisalternative erhalten, damit
+    sich das 20.000-EUR-Budget trotz der 20.000-Stueck-Kappe ausschoepfen
+    laesst.
+    """
+    gruppen: dict[tuple, dict[int, list[Turbo]]] = {}
+    for p in products:
+        o = p.omega
+        if not math.isfinite(o) or o <= 0 or p.ask <= 0:
+            continue
+        key = (p.underlying, p.direction, p.product_type)
+        b = int(round(math.log(o) / math.log(bucket_step)))
+        gruppen.setdefault(key, {}).setdefault(b, []).append(p)
+
+    felder: list[list[Turbo]] = []
+    for buckets in gruppen.values():
+        for bp in buckets.values():
+            # enger Spread zuerst; bei Gleichstand der teurere Schein, weil er
+            # unter der Stueck-Kappe mehr Budget aufnimmt
+            bp.sort(key=lambda x: (round(x.spread_pct, 4), -x.ask))
+            felder.append(bp[:per_bucket])
+
+    # Round-Robin statt Abschneiden, damit keine Hebelregion wegfaellt
+    out: list[Turbo] = []
+    i = 0
+    while len(out) < max_products and any(len(f) > i for f in felder):
+        for f in felder:
+            if i < len(f):
+                out.append(f[i])
+                if len(out) >= max_products:
+                    break
+        i += 1
+
+    if verbose:
+        print(f"  Vorauswahl: {len(products):,} -> {len(out)} Produkte "
+              f"({len(gruppen)} Gruppen, {len(felder)} Hebelfelder)")
+    return out
 
 
 # ------------------------------------------------------------------ Optimizer
@@ -196,7 +256,8 @@ def optimise_basket(products: list[Turbo], depot_value: float,
                     objective: str = "p_target", target_multiple: float = 2.5,
                     alpha: float = 2.0, rest_of_depot: float | None = None,
                     n_paths: int = 40_000, units_cap_is_per_product: bool = True,
-                    n_restarts: int = 400, seed: int = 11) -> Basket:
+                    n_restarts: int = 400, seed: int = 11,
+                    max_candidates: int = 400) -> Basket:
     """Waehlt Stueckzahlen je Produkt unter allen Regelgrenzen.
 
     objective:
@@ -207,6 +268,18 @@ def optimise_basket(products: list[Turbo], depot_value: float,
     """
     if not products:
         raise ValueError("keine Produkte uebergeben")
+    # Doppelte WKN wuerden das Ergebnis-Dict kollabieren lassen: to_table()
+    # zeigt dann leere Koerbe an, obwohl Budget eingesetzt wurde.
+    eindeutig, gesehen = [], set()
+    for p in products:
+        if p.wkn not in gesehen:
+            gesehen.add(p.wkn)
+            eindeutig.append(p)
+    if len(eindeutig) < len(products):
+        print(f"  [optimizer] {len(products) - len(eindeutig)} doppelte WKN entfernt")
+    products = eindeutig
+    if len(products) > max_candidates:
+        products = preselect_candidates(products, max_candidates)
 
     budget = rules.leverage_budget(depot_value)
     pos_cap = rules.max_position_eur(depot_value)
