@@ -19,6 +19,7 @@ je Depot gilt, ist am ersten Spieltag mit zwei Kleinstorders zu verifizieren;
 from __future__ import annotations
 
 import csv
+import math
 import zlib
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -43,7 +44,8 @@ class Turbo:
     ko_barrier: float
     ratio: float = 1.0        # Bezugsverhaeltnis
     leverage: float | None = None
-    product_type: str = "turbo"   # "turbo" (Knock-out) oder "factor" (Faktor-Zertifikat)
+    product_type: str = "turbo"   # turbo | factor | warrant
+    days_to_expiry: int | None = None   # nur fuer Standard-Optionsscheine
 
     @property
     def spread_pct(self) -> float:
@@ -105,8 +107,34 @@ def simulate_underlying_paths(spot: float, annual_vol: float, horizon_days: int,
     return spot * np.cumprod(1.0 + r, axis=1)
 
 
+def _norm_cdf(x: np.ndarray) -> np.ndarray:
+    """Standardnormalverteilung ohne scipy-Abhaengigkeit."""
+    return 0.5 * (1.0 + np.vectorize(math.erf)(x / math.sqrt(2.0)))
+
+
+def black_scholes(S: np.ndarray, K: float, vol: float, t_years: float,
+                  direction: int = +1, r: float = 0.0) -> np.ndarray:
+    """Wert eines Standard-Optionsscheins am Bewertungshorizont.
+
+    Anders als beim Turbo ist der Schein am Horizont noch nicht faellig -- er
+    hat Restzeitwert. Ihn mit dem inneren Wert zu bewerten waere grob falsch
+    und wuerde aus dem Geld liegende Scheine systematisch zu schlecht rechnen.
+    """
+    S = np.asarray(S, dtype=float)
+    if t_years <= 1e-9 or vol <= 1e-9:
+        return np.maximum(direction * (S - K), 0.0)
+    sq = vol * math.sqrt(t_years)
+    d1 = (np.log(np.maximum(S, 1e-12) / K) + (r + 0.5 * vol * vol) * t_years) / sq
+    d2 = d1 - sq
+    disc = math.exp(-r * t_years)
+    if direction > 0:
+        return S * _norm_cdf(d1) - K * disc * _norm_cdf(d2)
+    return K * disc * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+
+
 def payoff_per_unit(t: Turbo, S_end: np.ndarray, S_min: np.ndarray,
-                    S_max: np.ndarray, paths: np.ndarray | None = None) -> np.ndarray:
+                    S_max: np.ndarray, paths: np.ndarray | None = None,
+                    vol: float = 0.25, horizon_days: int = 5) -> np.ndarray:
     """Wert eines Scheins am Horizont.
 
     Turbo: intrinsischer Wert mit Knock-out-Absorption (Barriere intraday).
@@ -114,6 +142,11 @@ def payoff_per_unit(t: Turbo, S_end: np.ndarray, S_min: np.ndarray,
     aber Volatilitaetsdrag -- in einem Trend zinst es auf, in einer Seitwaerts-
     bewegung zerfaellt es. Braucht den vollen Pfad, nicht nur den Endkurs.
     """
+    if t.product_type == "warrant":
+        # Restlaufzeit am Horizont; ohne Laufzeitangabe konservativ 60 Tage
+        rest = max((t.days_to_expiry or 60) - horizon_days, 0) / 252.0
+        return black_scholes(S_end, t.ko_barrier, vol, rest, t.direction) * t.ratio
+
     if t.product_type == "factor":
         if paths is None:
             raise ValueError("Faktor-Zertifikate brauchen den vollen Pfad "
@@ -198,7 +231,8 @@ def optimise_basket(products: list[Turbo], depot_value: float,
             paths = None
             S_end, S_min, S_max = simulate_underlying(
                 p.underlying_price, vol, horizon_days, n_paths, seed=sd)
-        payoffs[:, i] = payoff_per_unit(p, S_end, S_min, S_max, paths)
+        payoffs[:, i] = payoff_per_unit(p, S_end, S_min, S_max, paths,
+                                        vol=vol, horizon_days=horizon_days)
 
     ask = np.array([p.ask for p in products])
     spread = np.array([p.spread_pct for p in products])
@@ -504,3 +538,218 @@ def replace_turbo(t: Turbo, **kw) -> Turbo:
     d = asdict(t)
     d.update(kw)
     return Turbo(**d)
+
+
+# ------------------------------------------------------- SG-Excel-Import
+# Produktarten des SG-Produktfinders -> Modelltyp und Handelbarkeit im Spiel.
+# "Classic Aktienanleihen" sind nach Ziffer 4 der Spielregeln ausdruecklich
+# nicht handelbar (Stueckzinsen) und werden hart herausgefiltert.
+SG_PRODUCT_TYPES = {
+    "BEST Turbo-Optionsscheine (Open-End)":  ("turbo",  True),
+    "Unlimited Turbo-Optionsscheine (Mini)": ("turbo",  True),
+    "Classic Turbo-Optionsscheine":          ("turbo",  True),
+    "Faktor-Optionsscheine":                 ("factor", True),
+    "Standard-Optionsscheine (Call)":        ("warrant", True),
+    "Standard-Optionsscheine (Put)":         ("warrant", True),
+    "Inline-Optionsscheine":                 ("inline", True),
+    "Classic Discount-Zertifikate":          ("discount", False),
+    "Capped Bonus-Zertifikate":              ("bonus", False),
+    "Classic Bonus-Zertifikate":             ("bonus", False),
+    "Memory Express-Zertifikate":            ("express", False),
+    "Fixkupon Express-Zertifikate":          ("express", False),
+    "Classic Aktienanleihen":                ("aktienanleihe", False),  # im Spiel verboten
+}
+
+# Produktarten, die unter die 20-%/20.000-EUR-Hebelkappe fallen. Die
+# Spielregeln nennen "Optionsscheine, Turbo-Optionsscheine und Faktor-
+# Optionsscheine". Ob das Spiel Inline-Optionsscheine ebenfalls als gehebelt
+# fuehrt, ist offen -- siehe Testplan im README.
+SG_LEVERAGED = {"turbo", "factor", "warrant"}
+
+
+def _de_num(series):
+    """Deutsche Zahlenformate aus dem SG-Export in float wandeln."""
+    import pandas as pd
+    s = (series.astype(str)
+         .str.replace(" EUR", "", regex=False).str.replace(" USD", "", regex=False)
+         .str.replace(" ", "", regex=False).str.strip())
+    # Punkt ist Tausendertrenner nur, wenn danach noch ein Komma kommt
+    has_comma = s.str.contains(",", regex=False)
+    s = s.where(~has_comma, s.str.replace(".", "", regex=False))
+    s = s.str.replace(",", ".", regex=False)
+    return pd.to_numeric(s, errors="coerce")
+
+
+def load_products_xlsx(path: str | Path, assumed_ratio: float = 1.0,
+                       verbose: bool = True) -> tuple[list[Turbo], dict]:
+    """Liest einen ProductSearch-Export (.xlsx) der Societe Generale.
+
+    Gibt (bewertbare Produkte, Diagnose) zurueck. Die Diagnose benennt
+    ausdruecklich, welche Felder fehlen -- der Standardexport enthaelt weder
+    Knock-out-Schwelle noch Bezugsverhaeltnis noch die Long/Short-Richtung,
+    und ohne diese drei laesst sich ein Turbo nicht bewerten. Es wird nichts
+    geraten: Produkte ohne ausreichende Daten landen in der Diagnose, nicht
+    im Ergebnis.
+    """
+    import pandas as pd
+
+    df = pd.read_excel(path, header=1)
+    diag: dict = {"zeilen_gesamt": len(df), "spalten": list(df.columns)}
+
+    colmap = {c.lower().strip(): c for c in df.columns}
+
+    def col(*names):
+        for n in names:
+            for low, orig in colmap.items():
+                if n in low:
+                    return orig
+        return None
+
+    c_wkn = col("wkn")
+    c_bw = col("basiswert")
+    c_art = col("produktart")
+    c_spot = col("kurs basiswert")
+    c_bid = col("geld")
+    c_ask = col("brief")
+    c_ko = col("knock", "basispreis", "strike", "barriere")
+    c_ratio = col("bezugsverh", "ratio")
+    c_lev = col("hebel", "omega")
+    c_dir = col("richtung", "typ", "call/put", "long/short")
+    c_exp = col("bewertungstag", "laufzeit", "faelligkeit")
+
+    diag["fehlende_pflichtfelder"] = [n for n, c in
+                                      [("Knock-out/Basispreis", c_ko),
+                                       ("Bezugsverhaeltnis", c_ratio),
+                                       ("Hebel", c_lev),
+                                       ("Long/Short-Richtung", c_dir)] if c is None]
+
+    df["_ask"] = _de_num(df[c_ask]) if c_ask else None
+    df["_bid"] = _de_num(df[c_bid]) if c_bid else None
+    df["_spot"] = _de_num(df[c_spot]) if c_spot else None
+    df["_ko"] = _de_num(df[c_ko]) if c_ko else float("nan")
+    df["_ratio"] = _de_num(df[c_ratio]) if c_ratio else float("nan")
+    df["_lev"] = _de_num(df[c_lev]) if c_lev else float("nan")
+
+    kinds, tradeable = [], []
+    for art in df[c_art].fillna(""):
+        k, t = SG_PRODUCT_TYPES.get(str(art).strip(), ("unbekannt", False))
+        kinds.append(k)
+        tradeable.append(t)
+    df["_kind"] = kinds
+    df["_spielbar"] = tradeable
+
+    diag["nach_produktart"] = df[c_art].value_counts().to_dict()
+    diag["im_spiel_nicht_handelbar"] = int((~df["_spielbar"]).sum())
+    diag["ohne_briefkurs"] = int((df["_ask"].isna() | (df["_ask"] <= 0)).sum())
+    diag["basiswerte"] = sorted(df[c_bw].dropna().unique().tolist())
+
+    out: list[Turbo] = []
+    verworfen: dict[str, int] = {}
+
+    def drop(reason):
+        verworfen[reason] = verworfen.get(reason, 0) + 1
+
+    for _, r in df.iterrows():
+        if not r["_spielbar"]:
+            drop("Produktart im Spiel nicht handelbar")
+            continue
+        ask = r["_ask"]
+        if not ask or ask <= 0:
+            drop("kein Briefkurs (nicht kaufbar)")
+            continue
+
+        kind = r["_kind"]
+        art = str(r[c_art])
+        direction = -1 if ("Put" in art or "Short" in art) else +1
+        if c_dir and isinstance(r.get(c_dir), str):
+            if any(k in r[c_dir].lower() for k in ("short", "put", "bear")):
+                direction = -1
+
+        lev = r["_lev"] if r["_lev"] == r["_lev"] else None
+        ratio = r["_ratio"] if r["_ratio"] == r["_ratio"] else assumed_ratio
+        spot = r["_spot"]
+        ko = r["_ko"]
+
+        if kind == "factor":
+            if lev is None:
+                drop("Faktor-Produkt ohne Hebelangabe")
+                continue
+            ko = 0.0
+        elif kind == "turbo":
+            if ko != ko:                    # NaN -> keine Barriere im Export
+                drop("Turbo ohne Knock-out-Schwelle -- nicht bewertbar")
+                continue
+            if spot != spot:
+                drop("kein Basiswertkurs")
+                continue
+        elif kind == "warrant":
+            if ko != ko:
+                drop("Optionsschein ohne Basispreis -- nicht bewertbar")
+                continue
+            if spot != spot:
+                drop("kein Basiswertkurs")
+                continue
+        else:
+            drop(f"Typ '{kind}' wird vom Payoff-Modell nicht abgedeckt")
+            continue
+
+        days_exp = None
+        if c_exp is not None:
+            val = r.get(c_exp)
+            if isinstance(val, pd.Timestamp):
+                days_exp = max((val.date() - pd.Timestamp.today().date()).days, 1)
+
+        out.append(Turbo(
+            wkn=str(r[c_wkn]).strip(), name=f"{r[c_bw]} {art}",
+            underlying=str(r[c_bw]).strip(), direction=direction,
+            ask=float(ask), bid=float(r["_bid"]) if r["_bid"] == r["_bid"] else float(ask) * 0.99,
+            underlying_price=float(spot) if spot == spot else 0.0,
+            ko_barrier=float(ko) if ko == ko else 0.0,
+            ratio=float(ratio), leverage=float(lev) if lev else None,
+            product_type=kind, days_to_expiry=days_exp,
+        ))
+
+    diag["verworfen"] = verworfen
+    diag["bewertbar"] = len(out)
+
+    if verbose:
+        print(f"[SG-Import] {len(df)} Zeilen -> {len(out)} bewertbare Produkte")
+        if diag["fehlende_pflichtfelder"]:
+            print("  FEHLENDE SPALTEN:", ", ".join(diag["fehlende_pflichtfelder"]))
+        for reason, n in sorted(verworfen.items(), key=lambda x: -x[1]):
+            print(f"    {n:5d}  {reason}")
+    return out, diag
+
+
+def load_products_dir(directory: str | Path, pattern: str = "*.xlsx",
+                      assumed_ratio: float = 1.0) -> tuple[list[Turbo], dict]:
+    """Liest alle SG-Exporte eines Verzeichnisses und fuehrt sie zusammen.
+
+    Der Produktfinder deckelt jeden Export bei 5.000 Produkten, das Universum
+    umfasst aber rund 300.000. Deshalb wird in Scheiben exportiert (je Basiswert
+    und Produktart) und hier wieder zusammengesetzt; Duplikate ueber die WKN
+    werden entfernt.
+    """
+    directory = Path(directory)
+    alle: dict[str, Turbo] = {}
+    gesamt = {"dateien": [], "zeilen": 0, "verworfen": {}, "basiswerte": set()}
+    for f in sorted(directory.glob(pattern)):
+        prods, diag = load_products_xlsx(f, assumed_ratio, verbose=False)
+        for p in prods:
+            alle[p.wkn] = p
+        gesamt["dateien"].append({"datei": f.name, "zeilen": diag["zeilen_gesamt"],
+                                  "bewertbar": diag["bewertbar"],
+                                  "fehlend": diag["fehlende_pflichtfelder"]})
+        gesamt["zeilen"] += diag["zeilen_gesamt"]
+        gesamt["basiswerte"].update(diag["basiswerte"])
+        for k, v in diag["verworfen"].items():
+            gesamt["verworfen"][k] = gesamt["verworfen"].get(k, 0) + v
+    gesamt["basiswerte"] = sorted(gesamt["basiswerte"])
+    gesamt["bewertbar_gesamt"] = len(alle)
+
+    print(f"[SG-Import] {len(gesamt['dateien'])} Datei(en), {gesamt['zeilen']:,} Zeilen "
+          f"-> {len(alle):,} eindeutige bewertbare Produkte")
+    for d in gesamt["dateien"]:
+        miss = f"  FEHLT: {', '.join(d['fehlend'])}" if d["fehlend"] else ""
+        print(f"    {d['datei']:<44} {d['zeilen']:>6,} -> {d['bewertbar']:>6,}{miss}")
+    return list(alle.values()), gesamt

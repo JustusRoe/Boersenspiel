@@ -211,6 +211,73 @@ maßgebliche Instanz.
 
 ---
 
+## 6a. SG-Produktdaten exportieren — Anleitung
+
+Der Produktfinder auf sg-zertifikate.de deckelt **jeden Export bei 5.000
+Produkten**, das Gesamtuniversum umfasst rund 300.000. Ein ungefilterter
+Export wird alphabetisch abgeschnitten und enthält dann nur A-Basiswerte
+(1&1 bis AMD) — also kein einziges Indexprodukt.
+
+### Spalten, die zwingend aktiviert sein müssen
+
+Der Standardexport liefert nur WKN, Basiswert, Produktart, Bewertungstag,
+Kurs Basiswert, Geld, Brief. Damit ist **kein einziges Produkt bewertbar**.
+Zusätzlich nötig:
+
+| Spalte | Wofür |
+|---|---|
+| **Basispreis / Knock-out-Schwelle** | Der Abstand zur Barriere *ist* der Hebel. Ohne sie geht nichts. |
+| **Long/Short bzw. Call/Put** | Nicht ableitbar: der Preis ist \|Spot − KO\| in beide Richtungen. |
+| **Bezugsverhältnis** | Sonst ist der Hebel um Faktor 10 mehrdeutig. |
+| **Hebel / Omega** | Kreuzprobe gegen den abgeleiteten Wert. |
+| Laufzeit / Bewertungstag | Restzeitwert bei Standard-Optionsscheinen. |
+
+### Produktarten
+
+| Produktart | Nehmen? | Begründung |
+|---|---|---|
+| BEST Turbo-Optionsscheine (Open-End) | **ja** | Höchster Hebel, klare Barriere, kein Zeitwertverlust |
+| Unlimited Turbo-Optionsscheine (Mini) | **ja** | Wie oben, mit Stop-Loss-Schwelle |
+| Faktor-Optionsscheine | **ja** | Kein Knock-out → der Hebel-Slot überlebt acht Wochen (§3) |
+| Standard-Optionsscheine (Call/Put) | optional | Konvex, aber Zeitwertverlust; nur für Termine ≤ 2 Wochen |
+| Inline-Optionsscheine | Test | Auszahlung auf 10 € gedeckelt, ein 0,50-€-Schein wäre dennoch 20× |
+| Discount-, Bonus-, Express-Zertifikate | nein | Gedeckelte Upside — das Gegenteil der Zielfunktion |
+| **Classic Aktienanleihen** | **nein** | Nach §4 der Spielregeln nicht handelbar (Stückzinsen) |
+
+### Empfohlene Exportscheiben
+
+Jede bleibt unter dem 5.000er-Limit:
+
+1. **DAX** — nur BEST + Unlimited Turbos (FOMC/EZB-Wetten)
+2. **DAX, Nasdaq 100, S&P 500** — nur Faktor-Optionsscheine (Compounder-Basis)
+3. **S&P 500, Nasdaq 100** — nur Turbos
+4. **Einzelaktien** aus `data/screen_latest.csv` — Turbos + Faktor
+
+Alle Dateien nach `data/sg/` legen, dann:
+
+```python
+from strategy.optimizer import load_products_dir, optimise_basket
+
+produkte, diag = load_products_dir("data/sg")
+korb = optimise_basket(produkte, depot_value=100_000, horizon_days=5,
+                       vol_by_underlying={"DAX": 0.16, "S&P 500": 0.14},
+                       objective="p_target", target_multiple=1.5)
+print(korb.to_table())
+```
+
+Der Importer verwirft Produkte, die er nicht sauber bewerten kann, statt
+Werte zu raten, und nennt für jede verworfene Zeile den Grund.
+
+### Offene Frage an den Produktfinder
+
+Gibt es eine eigene Kategorie **„Faktor-Zertifikate"** (nicht
+„Faktor-*Optionsscheine*")? Die Spielregeln zählen als gehebelt nur
+„Optionsscheine, Turbo-Optionsscheine und Faktor-Optionsscheine" auf. Ein
+gehebeltes Produkt außerhalb dieser Namen fiele nicht unter die
+20.000-€-Kappe — das wäre die größte legale Lücke im Regelwerk.
+
+---
+
 ## 7. Was ausdrücklich verboten ist
 
 Ziffer 10 der Spielregeln, ohne Interpretationsspielraum:
