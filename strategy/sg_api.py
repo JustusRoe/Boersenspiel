@@ -182,22 +182,49 @@ class SGClient:
 
 
 # ------------------------------------------------------------ Konvertierung
-def fx_to_eur(records: list[dict], fx_rate: float | None = None) -> float:
-    """Umrechnungsfaktor: Basiswertwaehrung -> EUR.
+# Yahoo-Symbole fuer "Einheiten der Waehrung je EUR"
+FX_SYMBOLE = {"USD": "EURUSD=X", "JPY": "EURJPY=X", "GBP": "EURGBP=X",
+              "CHF": "EURCHF=X", "SEK": "EURSEK=X", "NOK": "EURNOK=X",
+              "DKK": "EURDKK=X", "CAD": "EURCAD=X", "AUD": "EURAUD=X",
+              "HKD": "EURHKD=X", "PLN": "EURPLN=X"}
+# Waehrungen, die keine sind: Indexpunkte und Prozentnotierungen
+KEINE_WAEHRUNG = {"", "EUR", "Pkt", "PKT", "%", "Punkte", "Index"}
 
-    Scheine auf US-Aktien notieren in EUR, ihr Basispreis aber in USD. Ohne
-    Umrechnung ist der theoretische Preis um den Wechselkurs zu hoch (Faktor
-    ~1,16). Das faellt nicht als Fehler auf, sondern verschiebt die
-    Preisprobe -- und filtert im Zweifel eine ganze Richtung heraus.
+
+def fx_to_eur(records: list[dict], fx_rate: float | None = None) -> float:
+    """Umrechnungsfaktor: Einheiten der Basiswertwaehrung je EUR.
+
+    Der Basispreis steht in der Waehrung des Basiswerts, der Schein notiert
+    in EUR. Ohne Umrechnung ist der theoretische Preis um den Wechselkurs
+    daneben. Das faellt nicht als Fehler auf, sondern verschiebt die
+    Preisprobe -- bei USD um Faktor 1,16, bei JPY um Faktor 180.
+
+    Der Rueckgabewert ist immer "wie viele Einheiten der Basiswertwaehrung
+    entsprechen einem Euro", also 1,16 fuer USD und rund 180 fuer JPY.
+    Indexpunkte und Prozentnotierungen liefern 1,0.
     """
-    waehrungen = {str(r.get("AssetCurrency") or r.get("AssetCurrencyRaw") or "")
+    waehrungen = {str(r.get("AssetCurrency") or r.get("AssetCurrencyRaw") or "").strip()
                   for r in records}
-    if not (waehrungen & {"USD"}):
+    fremd = {w for w in waehrungen if w not in KEINE_WAEHRUNG}
+    if not fremd:
         return 1.0
-    if fx_rate is None:
-        from . import data
-        fx_rate = data.last_price("EURUSD=X") or 1.16
-    return float(fx_rate)
+    if len(fremd) > 1:
+        print(f"  [fx] uneinheitliche Basiswertwaehrungen {sorted(fremd)} -- "
+              f"keine Umrechnung, Ergebnisse pruefen")
+        return 1.0
+    ccy = fremd.pop()
+    if fx_rate is not None:
+        return float(fx_rate)
+    sym = FX_SYMBOLE.get(ccy)
+    if not sym:
+        print(f"  [fx] kein Wechselkurs fuer '{ccy}' hinterlegt -- keine Umrechnung")
+        return 1.0
+    from . import data
+    kurs = data.last_price(sym)
+    if not kurs:
+        print(f"  [fx] Wechselkurs {sym} nicht abrufbar -- keine Umrechnung")
+        return 1.0
+    return float(kurs)
 
 
 def infer_spot(records: list[dict], fx: float = 1.0) -> float | None:
