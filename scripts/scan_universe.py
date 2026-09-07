@@ -23,6 +23,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -74,8 +75,29 @@ def loese_ticker(ric: str, spot_eur: float, fx: float,
         waehrung = df.attrs.get("currency")
         kurs_eur = kurs / fx if waehrung == "USD" else kurs
         if abs(kurs_eur - spot_eur) / max(spot_eur, 1e-9) <= toleranz:
-            vola = float(df["close"].pct_change().tail(20).std())
-            return sym, vola
+            r = df["close"].pct_change().dropna()
+            if len(r) < 60:
+                continue
+            r60 = r.tail(60)
+            # Zwei Groessen, die man nicht vermischen darf:
+            #   vola_typisch  -- der gewoehnliche Tag. Entscheidet, ob die
+            #                    Knock-out-Barriere haelt. Robust geschaetzt
+            #                    ueber den Median der Absolutrenditen, damit
+            #                    ein einzelner Ereignistag ihn nicht dominiert.
+            #   sprung        -- das Tail-Risiko. Entscheidet, ob es ueberhaupt
+            #                    einen grossen Tag geben kann.
+            # Die Standardabweichung mischt beides. Bei Moderna hat ein
+            # einziger +177-%-Tag die 20-Tage-Standardabweichung auf 40 %
+            # getrieben, waehrend der typische Tag bei 5 % lag -- ein Ranking
+            # auf dieser Basis sortiert genau die Namen nach oben, deren
+            # Ereignis bereits vorbei ist.
+            vola_typisch = float(np.median(np.abs(r60)) * 1.4826)
+            vola_std = float(r60.std())
+            r252 = r.tail(252)
+            return sym, {"typisch": vola_typisch, "std": vola_std,
+                         "verhaeltnis": vola_std / max(vola_typisch, 1e-9),
+                         "sprungtage": float((r252.abs() > 0.08).mean() * 252),
+                         "max_tag": float(r252.abs().max())}
     return None, None
 
 
@@ -127,15 +149,18 @@ def main() -> None:
         if len(ts) < 10:
             return None
         eng = min(ts, key=lambda t: t.distance_to_ko_pct)
-        sym, vola = loese_ticker(str(a.get("Ric") or ""), spot, fx)
-        if not sym or not vola:
+        sym, v = loese_ticker(str(a.get("Ric") or ""), spot, fx)
+        if not sym or not v:
             return None
+        vt = v["typisch"]
         return {"Basiswert": a["Name"], "Yahoo": sym, "Produkte": j["TotalCount"],
-                "Kurs EUR": spot, "Tagesvola %": vola * 100,
+                "Kurs EUR": spot, "Vola typisch %": vt * 100,
+                "Vola std %": v["std"] * 100, "std/MAD": v["verhaeltnis"],
+                "Sprungtage/Jahr": v["sprungtage"], "groesster Tag %": v["max_tag"] * 100,
                 "engster KO %": eng.distance_to_ko_pct * 100,
-                "in Sigma": eng.distance_to_ko_pct / vola,
+                "KO in Sigma": eng.distance_to_ko_pct / vt,
                 "Hebel": eng.omega, "Spread %": eng.spread_pct * 100,
-                "Sleeve-Tagesvola %": eng.omega * vola * 100, "WKN": eng.wkn}
+                "Sleeve-Tagesvola %": eng.omega * vt * 100, "WKN": eng.wkn}
 
     zeilen = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -150,6 +175,14 @@ def main() -> None:
         print("Keine verwertbaren Basiswerte.")
         return
     df = pd.DataFrame(zeilen).sort_values("Sleeve-Tagesvola %", ascending=False)
+    # Eine Barriere unter 0,6 typischen Sigma wuerde kein Emittent stellen --
+    # ein solcher Wert heisst, dass die Volatilitaetsschaetzung nicht stimmt.
+    unplausibel = df[df["KO in Sigma"] < 0.6]
+    if len(unplausibel):
+        print(f"\n  {len(unplausibel)} Basiswerte aussortiert (Barriere unter 0,6 Sigma, "
+              f"Vola-Schaetzung unplausibel): "
+              f"{', '.join(unplausibel['Basiswert'].head(6))}")
+        df = df[df["KO in Sigma"] >= 0.6]
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.out, index=False)
     pd.set_option("display.width", 200)
