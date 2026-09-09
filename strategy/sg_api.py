@@ -381,12 +381,27 @@ def enrich_factors(client: "SGClient", records: list[dict], workers: int = 6,
     if verbose:
         print(f"  Reichere {len(ziel):,} Faktor-Produkte an ({workers} parallel) ...")
 
-    clients = [SGClient(pause=client.pause * workers) for _ in range(workers)]
+    # requests.Session ist nicht thread-sicher. Die Clients nach Auftragsindex
+    # zu verteilen (clients[idx % workers]) sieht nach Trennung aus, ist aber
+    # keine: der Pool weist Auftraege frei zu, also greifen zwei Threads
+    # regelmaessig gleichzeitig auf dieselbe Session zu. Das wirft keine
+    # Ausnahme, sondern vertauscht Antworten -- im Test bekam ein
+    # ausgeknockter Schein die Kurse eines gesunden Nachbarn zugewiesen, was
+    # als handelbares Produkt mit Traumhebel durchging. Deshalb: eine Session
+    # je Thread, gebunden ueber thread-lokalen Speicher.
+    import threading
+    lokal = threading.local()
+
+    def mein_client() -> "SGClient":
+        c = getattr(lokal, "client", None)
+        if c is None:
+            c = lokal.client = SGClient(pause=client.pause * workers)
+        return c
 
     def hole(idx_rec):
-        idx, r = idx_rec
+        _, r = idx_rec
         try:
-            return r, clients[idx % workers].properties_dict(r["Id"])
+            return r, mein_client().properties_dict(r["Id"])
         except SGApiError:
             return r, None
 
